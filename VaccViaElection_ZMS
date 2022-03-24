@@ -1,0 +1,351 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "459307c1-72ba-4440-b31f-08c775a8b29e",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#import modules\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import matplotlib.pyplot as plt\n",
+    "import tensorflow as tf\n",
+    "from tensorflow import keras\n",
+    "from scikeras.wrappers import KerasClassifier, KerasRegressor\n",
+    "from sklearn.linear_model import LinearRegression\n",
+    "from sklearn.pipeline import Pipeline\n",
+    "from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score\n",
+    "from sklearn.preprocessing import StandardScaler, OneHotEncoder, StandardScaler, OrdinalEncoder, PowerTransformer\n",
+    "from sklearn.impute import SimpleImputer\n",
+    "from sklearn.compose import ColumnTransformer\n",
+    "from sklearn.metrics import mean_squared_error, mean_absolute_error\n",
+    "from sklearn.linear_model import Perceptron\n",
+    "from sklearn.ensemble import RandomForestClassifier"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "e262e10c-9460-4770-9f75-b222db5a17ce",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#function definitions\n",
+    "def plot_learning_curve( history ):\n",
+    "    pd.DataFrame(history.history).plot(figsize=(8, 5))\n",
+    "    plt.grid(True)\n",
+    "    ymin, ymax = [], []\n",
+    "    for x in history.history.keys():\n",
+    "        ymax.append( max(history.history[x]))\n",
+    "        ymin.append( min(history.history[x]))\n",
+    "    plt.gca().set_ylim(min(ymin)*.95, max(ymax)*1.05)\n",
+    "    plt.xlabel(\"EPOCHS\")\n",
+    "    plt.show() \n",
+    "    \n",
+    "def build_RegMLP_model(n_hidden=1, n_neurons=30, learning_rate=1e-3, input_shape=[8]):\n",
+    "    model = keras.models.Sequential()\n",
+    "    model.add(keras.layers.Flatten())\n",
+    "    for layer in range(n_hidden):\n",
+    "        model.add(keras.layers.Dense(n_neurons, activation=\"relu\"))\n",
+    "    model.add(keras.layers.Dense(1))\n",
+    "    model.compile(loss=\"mean_squared_error\", optimizer=keras.optimizers.SGD(learning_rate=learning_rate) )\n",
+    "    return model\n",
+    "\n",
+    "import os,urllib, urllib.request, sys, tarfile\n",
+    "def downloadDataResource(file,sourcePath,compressed=None):\n",
+    "    if not os.path.isfile(file):\n",
+    "        try:\n",
+    "            urllib.request.urlretrieve(sourcePath+(compressed if compressed else file),(compressed if compressed else file))\n",
+    "            print(\"Downloaded\", (compressed if compressed else file) )\n",
+    "            if compressed:\n",
+    "                ucomp = tarfile.open(compressed)\n",
+    "                ucomp.extractall()\n",
+    "                ucomp.close()\n",
+    "                print(\"File uncompressed.\")\n",
+    "        except:\n",
+    "            print(\"ERROR: File\", (compressed if compressed else file), \"not found. Data source missing.\")\n",
+    "    else:\n",
+    "        print(\"Data resource\", file, \"already downloaded.\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "bfc05d65-3011-4ad1-bac2-c9ad81491939",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Data resource COVID_31Dec2021.csv already downloaded.\n",
+      "Data resource ElectionEconomicSocialDataByFIPS.csv already downloaded.\n"
+     ]
+    }
+   ],
+   "source": [
+    "#get data\n",
+    "path = \"https://raw.githubusercontent.com/SueMcMetzger/MachineLearning/main/chpt4/\"\n",
+    "cdec31 = 'COVID_31Dec2021.csv'\n",
+    "EESD = 'ElectionEconomicSocialDataByFIPS.csv'\n",
+    "\n",
+    "downloadDataResource(cdec31, path)\n",
+    "downloadDataResource(EESD, path)\n",
+    "\n",
+    "covidData = pd.read_csv(cdec31)\n",
+    "electionData = pd.read_csv(EESD)\n",
+    "\n",
+    "#merge data\n",
+    "data = pd.merge(covidData, electionData, left_on='fips', right_on='fips', how='inner')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "id": "05b3b654-6294-4b9c-998e-438b23772ecd",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# data cleaning\n",
+    "data.dropna( subset=['Trump2020'], inplace=True )\n",
+    "data.dropna( subset=['vaccinationRate'], inplace=True )\n",
+    "\n",
+    "#create new columns\n",
+    "data[\"incubwin\"]=data['Trump2020'].apply(lambda x: 1 if x > 50 else 0)\n",
+    "data[\"IncomeRange\"]=data['MedianIncome'].apply(lambda x: \"High\" if x > 63003 else (\"Med\" if x > 47292 else \"Low\"))\n",
+    "\n",
+    "#drop redundant \n",
+    "data = data.drop(columns=['county'])\n",
+    "data = data.drop(columns=['Trump2016'])\n",
+    "\n",
+    "#onlydel\n",
+    "onlydel = data[ data.fips == 42045 ]\n",
+    "\n",
+    "data = data.drop(columns=['fips'])\n",
+    "onlydel = onlydel.drop(columns=['fips'])\n",
+    "onlydel_test = onlydel.drop(columns=['vaccinationRate'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "id": "e32e1dc9-8f57-474d-b3ab-f9dd7bada02d",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "(2298, 17)"
+      ]
+     },
+     "execution_count": 11,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "#create train & test data sets for dataLS\n",
+    "X_train, X_test, y_train, y_test = train_test_split(\n",
+    "    data.drop(columns=['vaccinationRate']),\n",
+    "    data.vaccinationRate, \n",
+    "    test_size=0.2, \n",
+    "    random_state=35, \n",
+    "      stratify=data.Region\n",
+    ")\n",
+    "\n",
+    "X_train.shape"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "id": "8a9ff5d0-a089-4caa-85b4-fd1d9d6b79bb",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#discern between attribs\n",
+    "cat_attribs = [\"state\", \"Region\", \"IncomeRange\", \"incubwin\"]\n",
+    "num_attribs = list( X_train.drop(columns=cat_attribs) )\n",
+    "\n",
+    "#create pipeline\n",
+    "num_pipeline = Pipeline( [\n",
+    " ('imputer', SimpleImputer(strategy=\"median\")),\n",
+    " ('std_scaler', StandardScaler()),   \n",
+    "])\n",
+    "\n",
+    "full_pipeline = ColumnTransformer( [\n",
+    "    ('num', num_pipeline, num_attribs),\n",
+    "    ('cat', OneHotEncoder(), cat_attribs)\n",
+    "])\n",
+    "\n",
+    "#pipeline X train and X test\n",
+    "X_train = full_pipeline.fit_transform(X_train)\n",
+    "\n",
+    "X_test = full_pipeline.transform(X_test)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 13,
+   "id": "dea8a4ca-6ab6-4afa-9e8f-94cc5999ed07",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "cat_encoder = full_pipeline.named_transformers_[\"cat\"]\n",
+    "cat_one_hot_attribs = []\n",
+    "if hasattr(cat_encoder, 'categories_'):\n",
+    "    for i in cat_encoder.categories_:\n",
+    "        cat_one_hot_attribs += list (i) \n",
+    "\n",
+    "#combines the numeric and encoded features\n",
+    "attributes = list(num_attribs) + list(cat_one_hot_attribs)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "id": "de6f1bcd-399d-498e-a957-88efbbe3822e",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "0.11452189372662684\n"
+     ]
+    }
+   ],
+   "source": [
+    "#baseline determination\n",
+    "baseline_prediction = y_train.median()\n",
+    "predictions = np.full(shape=2298, fill_value = baseline_prediction)\n",
+    "baseline_rmse = mean_squared_error(y_train, predictions, squared=False)\n",
+    "print(baseline_rmse)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 15,
+   "id": "f4d38e25-c5f7-4216-8103-7ec85583b3d5",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "0.06734811227343178\n"
+     ]
+    }
+   ],
+   "source": [
+    "#linear regression\n",
+    "lin_reg = LinearRegression()\n",
+    "lin_reg.fit(X_train,y_train)\n",
+    "predictions = lin_reg.predict(X_train)\n",
+    "lin_rmse = mean_squared_error(y_train, predictions, squared=False)\n",
+    "print(lin_rmse)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 16,
+   "id": "efb35c99-b1f9-48dd-8878-4b812c54425d",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "0.0669334899606039\n",
+      "0.2587150748615239\n"
+     ]
+    }
+   ],
+   "source": [
+    "#eval test set\n",
+    "predictions = lin_reg.predict(X_test)\n",
+    "linreg_mse = mean_squared_error(y_test, predictions, squared=False)\n",
+    "print(linreg_mse)\n",
+    "linreg_rmse = np.sqrt(linreg_mse)\n",
+    "print(linreg_rmse)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "id": "75edd80a-0230-46a8-b6d3-35823c2620fa",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[0.65499406]\n",
+      "2264    0.591\n",
+      "Name: vaccinationRate, dtype: float64\n"
+     ]
+    }
+   ],
+   "source": [
+    "#eval onlydel\n",
+    "del_prepped = full_pipeline.transform(onlydel_test)\n",
+    "\n",
+    "del_pred = lin_reg.predict(del_prepped)\n",
+    "print(del_pred)\n",
+    "print(onlydel.vaccinationRate)\n",
+    "error = (del_pred - onlydel.vaccinationRate)/onlydel.vaccinationRate"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 31,
+   "id": "6a32815e-fe22-47d4-aff4-babe04c592c3",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy: 10.83%\n"
+     ]
+    }
+   ],
+   "source": [
+    "onlydelvr = np.full(shape=1, fill_value = onlydel.vaccinationRate)\n",
+    "error = float((del_pred - onlydelvr)/onlydelvr)\n",
+    "print('Accuracy: {:.2f}%'.format(error*100))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "101fe702-338e-42b1-aeac-2d14d4e65ef3",
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.8"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
